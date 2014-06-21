@@ -4,12 +4,12 @@
 
 %define name smeserver-durep
 Name:          %{name}
-%define version 1.3.0
+%define version 1.5.0
 Version:       %{version}
-%define release 6
+%define release 1
 Release:       %{release}%{?dist}
 License:       GPL
-Source:  %{name}-%{version}.tgz
+Source:  %{name}-%{version}.tar.gz
 BuildRoot: /var/tmp/%{name}-%{version}-buildroot
 BuildRequires: e-smith-devtools
 BuildArch: noarch
@@ -22,6 +22,9 @@ Obsoletes:      e-smith-durep
 
 
 %changelog
+* Sat Jun 21 2014 stephane de Labrusse <stephdl@de-labrusse.fr> 1.5.0-1.sme
+- Initial release to sme9
+
 * Thu Sep 13 2012 JP Pialasse <test@pialasse.com> 1.3.0-6.sme
 - add Obsoletes smeserver-durep-saco e-smith-durep [SME 7108]
 - TODO cleaning spec file post and filelist chmod
