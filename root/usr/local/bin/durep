@@ -166,6 +166,7 @@ sub recursiveScan {
   my $coalesced_size = 0;
   my $node = {};
   my $temp;
+  my $dirhandle;
 
   $node->{ID} = $next_id++;
   if(defined $parent) {
@@ -187,9 +188,10 @@ sub recursiveScan {
 
   $node->{TYPE} &= $TYPE_COLLAPSED unless $store;
 
-  opendir(DIR, $dir) or warn "Unable to open dir '$dir': $!\n" and return $node;
+ opendir($dirhandle, $dir) or warn "Unable to open dir '$dir': $!\n" and return $node;
 
-  foreach(readdir(DIR)) {
+
+  foreach(readdir($dirhandle)) {
     @stats = lstat "$dir/$_" or warn "Unable to lstat '$dir/$_': $!\n" and next;
 
     $node->{MTIME} = $stats[9] if($_ eq ".");
@@ -238,7 +240,7 @@ sub recursiveScan {
     $file_count++;
     $node->{FCOUNT}++;
   }
-  closedir(DIR);
+  closedir($dirhandle);
 
   if($coalesced_count) {
     if($store) {
