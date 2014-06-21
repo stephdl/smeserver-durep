@@ -1,0 +1,125 @@
+a:hover { 
+  background-color: #DDDDDD;
+}
+
+body {
+  text-align: center;
+  background-color: #ffffff;
+}
+
+div.tbar { 
+  text-align: left;
+  width: 100%;
+  background-color: #EEEEEE;
+  border-top: solid 1px #DDDDDD;
+  border-bottom: solid 1px #DDDDDD;
+}
+
+div.bbar { 
+  text-align: left;
+  width: 100%;
+  background-color: #EEEEEE;
+  border-top: solid 1px #DDDDDD;
+  border-bottom: solid 1px #DDDDDD;
+}
+
+div.bbar * { 
+  font-size: 90%;
+}
+
+div.options { 
+  text-align: left;
+  margin: 2em;
+  background-color: #EEEEEE;
+  border: solid 1px #DDDDDD;
+}
+
+.light {
+  background-color: #ffffff;
+ }
+
+.mid {
+  background-color: #f6f6f6;
+}
+
+.dark {
+  background-color: #f0f0f0;
+}
+
+.tbar table {
+  width: 100%;
+  padding-left: 2pt;
+  font-weight: bold;
+}
+
+.bbar table {
+  width: 100%;
+  padding-left: 2pt;
+}
+
+table.list {
+  margin: 2em 0px;
+  border: solid 1px #CCCCCC;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+table.list td {
+  text-align: left;
+  padding: 2px 5px;
+}
+
+table.list th {
+  text-align: left;
+  padding: 2px 5px;
+  text-align: left;
+  background-color: #DDDDDD;
+}
+
+table.report {
+  margin: 2em 0px;
+  border: solid 1px #CCCCCC;
+  text-align: left;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+table.report td {
+  padding: 2px 5px;
+}
+
+table.report th {
+  padding: 2px 5px;
+  text-align: left;
+  background-color: #DDDDDD;
+}
+
+.graph {
+  padding: 0px;
+  background-color: #eeeeee;
+  width: 200px;
+  height: 15px;
+}
+
+th.right {
+  text-align: right;
+}
+
+td.right {
+  text-align: right;
+}
+
+span.dir { 
+  font-weight: bold;
+}
+
+span.empty { 
+  color: #006600;
+  font-weight: bold;
+}
+
+span.coalesced { 
+  color: #880000;
+  font-weight: bold;
+}
+

@@ -1,0 +1,5 @@
+/usr/local/bin/durep -q -x -sf /var/lib/durep/user.ds /home/e-smith/files/users
+/usr/local/bin/durep -q -x -sf /var/lib/durep/ibays.ds /home/e-smith/files/ibays
+/usr/local/bin/durep -c /var/lib/durep/ 
+chmod 666 /var/lib/durep/*
+chmod 777 /etc/e-smith/web/panels/manager/html/durep/*.cgi

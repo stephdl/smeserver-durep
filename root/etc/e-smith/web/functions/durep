@@ -1,0 +1,73 @@
+#!/usr/bin/perl -wT
+
+#----------------------------------------------------------------------
+# heading     : Administration
+# description : Disk usage report 
+# navigation  : 4000 4390
+#
+#----------------------------------------------------------------------
+
+package esmith;
+
+use strict;
+use CGI ':all';
+use CGI::Carp qw(fatalsToBrowser);
+
+use esmith::cgi;
+use esmith::db;
+use esmith::util;
+
+sub showInitial ($);
+
+BEGIN
+{
+    # Clear PATH and related environment variables so that calls to
+    # external programs do not cause results to be tainted. See
+    # "perlsec" manual page for details.
+
+    $ENV {'PATH'} = '/bin:/usr/bin';
+    $ENV {'SHELL'} = '/bin/bash';
+    delete $ENV {'ENV'};
+}
+
+esmith::util::setRealToEffective ();
+
+$CGI::POST_MAX=1024 * 100;  # max 100K posts
+$CGI::DISABLE_UPLOADS = 1;  # no uploads
+
+my %conf;
+tie %conf, 'esmith::config';
+
+#------------------------------------------------------------
+# examine state parameter and display the appropriate form
+#------------------------------------------------------------
+
+my $q = new CGI;
+
+if (! grep (/^state$/, $q->param))
+{
+    showInitial ($q);
+}
+else
+{
+    esmith::cgi::genStateError ($q, \%conf);
+}
+
+exit (0);
+
+#------------------------------------------------------------
+# subroutine to display initial form
+#------------------------------------------------------------
+
+sub showInitial ($)
+{
+    my ($q) = @_;
+
+    my $url = "/server-manager/durep/durep.cgi";
+    print $q->redirect(-location => $url);
+
+## these lines aren't that important, they just prevent a
+## premature end of script headers error
+    esmith::cgi::genHeaderNonCacheable ($q, \%conf, 'DUREP reports');
+    esmith::cgi::genFooter ($q);
+}

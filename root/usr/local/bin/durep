@@ -1,0 +1,450 @@
+#!/usr/bin/perl -w
+
+#############################################################################
+# durep - Disk Usage Report Generator                                       #
+#                                                                           #
+# Copyright (C) 2004 Damian Kramer (psiren@hibernaculum.net)                #
+#                                                                           #
+# You may distribute this program under the terms of the Artistic License.  #
+#                                                                           #
+# This program is distributed in the hope that it will be useful, but       #
+# WITHOUT ANY WARRANTY; without even the implied warranty of                #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the             #
+# Artistic License for more details.                                        #
+#############################################################################
+
+use Getopt::Long;
+use File::Basename;
+use MLDBM qw(DB_File Storable);
+use Fcntl;
+use Sys::Hostname;
+use POSIX;
+use Cwd qw(cwd);
+
+use strict;
+
+our ($version, %options);
+our ($root_node, $filesystem_id, @stats);
+our ($opt_help, $opt_version, $opt_textdepth, $opt_hidesize, $opt_showdate, $opt_nosort, $opt_quiet);
+our ($opt_savefile, $opt_loadfile, $opt_desc, $opt_collate);
+our ($opt_files, $opt_onefilesystem, $opt_collapsepath, $opt_excludepath, $opt_coalescefiles);
+our ($root_dir, $file_count, $dir_count, $next_id);
+our ($TYPE_FILE, $TYPE_DIR, $TYPE_EMPTY, $TYPE_COALESCED, $TYPE_COLLAPSED);
+
+$TYPE_FILE        = 0;
+$TYPE_DIR         = 1;
+$TYPE_EMPTY       = 2;
+$TYPE_COALESCED   = 4;
+$TYPE_COLLAPSED   = 8;
+
+$version = "0.9";
+
+$| = 1;
+
+$SIG{INT} = \&catchError;
+
+%options = ("h|help"              => \$opt_help,
+	    "v|version"           => \$opt_version,
+	    "td|text-depth=i"     => \$opt_textdepth,
+	    "hs|hide-size=s"      => \$opt_hidesize,
+	    "sd|show-date"        => \$opt_showdate,
+	    "ns|nosort"           => \$opt_nosort,
+	    "q|quiet"             => \$opt_quiet,
+
+	    "sf|save-file=s"      => \$opt_savefile,
+	    "lf|load-file=s"      => \$opt_loadfile,
+	    "d|desc=s"            => \$opt_desc,
+	    "c|collate=s"         => \$opt_collate,
+
+	    "f|files"             => \$opt_files,
+	    "x|one-file-system"   => \$opt_onefilesystem,
+	    "cp|collapse-path=s"  => \$opt_collapsepath,
+	    "ep|exclude-path=s"   => \$opt_excludepath,
+	    "cf|coalesce-files=s" => \$opt_coalescefiles
+	   );
+
+
+&usage unless (GetOptions(%options));
+
+&usage if(defined $opt_help);
+
+if(defined $opt_version) {
+  print "durep version $version\n";
+  exit 0;
+}
+
+## Process options
+if($opt_collate) {
+  collate();
+  exit 0;
+}
+
+$opt_hidesize = processSizeOption($opt_hidesize) if(defined $opt_hidesize);
+$opt_coalescefiles = processSizeOption($opt_coalescefiles) if(defined $opt_coalescefiles);
+
+doAbort("Depth must be greater than 0.") if(defined $opt_textdepth && $opt_textdepth < 1);
+doAbort("You must specify a save file if you use --quiet.") if(defined $opt_quiet && !defined $opt_savefile);
+doAbort("You can't use --load-file and --save-file at the same time.") if(defined $opt_loadfile && defined $opt_savefile);
+
+if($opt_savefile) {
+  $opt_savefile .= ".ds" unless $opt_savefile =~ /\.ds$/;
+}
+
+
+push @ARGV, "." unless @ARGV;
+
+$root_dir = shift;
+chop $root_dir if $root_dir =~ m|./$|;  # Remove trailing /
+
+doAbort("`$root_dir' not a valid directory.") unless -d $root_dir;
+
+# Get the absolute pathname rather than relative pathname
+$_ = cwd();
+chdir($root_dir) or doAbort("Unable to chdir to '$root_dir'.");
+$root_dir = cwd();
+chdir($_);
+
+if($opt_loadfile) {
+  tie %{$root_node}, 'MLDBM', "$opt_loadfile", O_RDONLY, 0640 or doAbort("Unable to tie file '$opt_loadfile'.");
+}
+else {
+  ## Perform scan
+  $file_count = 0;
+  $dir_count = 0;
+  $next_id = 1;
+
+  $root_node = {};
+
+  if($opt_savefile) {
+    if(-r $opt_savefile) {
+      print "Removing existing savefile '$opt_savefile'.\n" unless $opt_quiet;
+      unlink $opt_savefile;
+    }
+
+    tie %{$root_node}, 'MLDBM', "$opt_savefile", O_CREAT|O_RDWR, 0640 or doAbort("Unable to tie file '$opt_savefile'.");
+  }
+
+  ($filesystem_id) = stat $root_dir if defined $opt_onefilesystem;
+
+  $root_node->{1} = recursiveScan($root_dir, undef, 1);
+  my $data;
+  $data->{FILE_COUNT} = $file_count;
+  $data->{DIR_COUNT} = $dir_count;
+  $data->{LAST_UPDATE} = time;
+  $data->{HOSTNAME} = hostname();
+  $data->{DESC} = $opt_desc if $opt_desc;
+  $data->{OPTIONS}->{FILES} = 1 if $opt_files;
+  $data->{OPTIONS}->{ONEFILESYSTEM} = 1 if $opt_onefilesystem;
+  $data->{OPTIONS}->{COLLAPSEPATH} = $opt_collapsepath if $opt_collapsepath;
+  $data->{OPTIONS}->{EXCLUDEPATH} = $opt_excludepath if $opt_excludepath;
+  $data->{OPTIONS}->{COALESCEFILES} = $opt_coalescefiles if $opt_coalescefiles;
+  $root_node->{DATA} = $data;
+}
+
+# use Data::Dumper;
+# print Dumper($root_node);
+
+if(!$opt_quiet) {
+  printf "[ %s  %s (%d files, %d dirs) ]\n", $root_node->{1}->{NAME}, prettyFileSize($root_node->{1}->{SIZE}),
+    $root_node->{1}->{FCOUNT}, $root_node->{1}->{DCOUNT};
+  printDir($root_node->{1}, 0);
+}
+
+if($opt_savefile || $opt_loadfile) {
+  untie %{$root_node};
+}
+
+
+exit 0;
+
+## End of program.
+
+sub recursiveScan {
+  my ($dir, $parent, $store) = @_;
+  my @children;
+  my $coalesced_count = 0;
+  my $coalesced_size = 0;
+  my $node = {};
+  my $temp;
+
+  $node->{ID} = $next_id++;
+  if(defined $parent) {
+    $node->{NAME} = basename($dir);
+    $node->{PARENT} = $parent;
+  }
+  else {
+    $node->{NAME} = $dir;
+  }
+
+  $node->{SIZE} = 0;
+  $node->{TYPE} = $TYPE_DIR;
+  $node->{DCOUNT} = 0;
+  $node->{FCOUNT} = 0;
+
+  if($store) {
+    $store = 0 if($opt_collapsepath && $dir =~ m/$opt_collapsepath/);
+  }
+
+  $node->{TYPE} &= $TYPE_COLLAPSED unless $store;
+
+  opendir(DIR, $dir) or warn "Unable to open dir '$dir': $!\n" and return $node;
+
+  foreach(readdir(DIR)) {
+    @stats = lstat "$dir/$_" or warn "Unable to lstat '$dir/$_': $!\n" and next;
+
+    $node->{MTIME} = $stats[9] if($_ eq ".");
+
+    # Skip '.' and '..'
+    next if(/^\.{1,2}$/);
+
+    if(-d _ && ! -l _ && !$opt_files) {
+      if(! -x _) {
+	warn "Unable to read directory `$dir/$_'. Skipping.\n";
+	next;
+      }
+
+      next if($opt_excludepath && "$dir/$_" =~ m/$opt_excludepath/);
+      next if($opt_onefilesystem && ($stats[0] != $filesystem_id));
+
+      $temp = recursiveScan("$dir/$_", $node->{ID}, $store);
+      $node->{SIZE} += $temp->{SIZE};
+      if($store) {
+	$root_node->{$temp->{ID}} = $temp;
+	push @children, $temp->{ID};
+	$dir_count++;
+	$node->{DCOUNT}++;
+      }
+      next;
+    }
+
+    if($opt_coalescefiles && $stats[7] < $opt_coalescefiles) {
+      $coalesced_count++;
+      $coalesced_size += $stats[7];
+    }	
+    else {
+      if($store) {
+	my $file = {};
+	$file->{ID} = $next_id++;
+	$file->{NAME} = $_;
+	$file->{SIZE} = $stats[7];
+	$file->{PARENT} = $node->{ID};
+	$file->{TYPE} = $TYPE_FILE;
+	$file->{MTIME} = $stats[9];
+	$root_node->{$file->{ID}} = $file;
+	push @children, $file->{ID};
+      }
+      $node->{SIZE} += $stats[7];
+    }
+    $file_count++;
+    $node->{FCOUNT}++;
+  }
+  closedir(DIR);
+
+  if($coalesced_count) {
+    if($store) {
+      my $file = {};
+      $file->{ID} = $next_id++;
+      $file->{NAME} = "[COALESCED FILES]";
+      $file->{SIZE} = $coalesced_size;
+      $file->{PARENT} = $node->{ID};
+      $file->{TYPE} = $TYPE_FILE|$TYPE_COALESCED;
+      $file->{MTIME} = 0;
+      $file->{FCOUNT} = $coalesced_count;
+      $root_node->{$file->{ID}} = $file;
+      push @children, $file->{ID};
+    }
+    $node->{SIZE} += $coalesced_size;
+  }
+
+  if(@children) {
+    $node->{CHILDREN} = \@children;
+  }
+  else {
+    $node->{TYPE} = $TYPE_DIR|$TYPE_EMPTY;
+  }
+
+#   $root_node->{$node->{ID}} = $node;
+  return $node;
+}
+
+
+sub collate {
+  my %db;
+
+  doAbort("'$opt_collate' is not a valid directory.") unless -d $opt_collate;
+
+  tie %db, 'MLDBM', "$opt_collate/durep.cds", O_CREAT|O_RDWR, 0640 or doAbort("Unable to tie file '$opt_collate/durep.cds'");
+
+  my @files;
+  my $next_id = 1;
+
+  opendir(DIR, $opt_collate) or doAbort("Unable to open dir '$opt_collate': $!");
+  foreach(readdir(DIR)) {
+    # Skip unless a .ds file
+    next unless(/\.ds$/);
+    push @files, $_;
+  }
+  closedir(DIR);
+
+  foreach my $file (sort @files) {
+    my $id = $next_id++;
+    my %temp;
+    tie %temp, 'MLDBM', "$opt_collate/$file", O_RDONLY, 0640 or doAbort("Unable to tie file '$opt_collate/$file'");
+    my %data = (%{$temp{DATA}});
+    $data{FILENAME} = $file;
+    $data{SIZE} = $temp{1}->{SIZE};
+    $data{ID} = $id;
+    $data{PATH} = $temp{1}->{NAME};
+    $db{$id} = \%data;
+    untie %temp;
+  }
+  untie %db;
+}
+
+
+sub printDir {
+  my ($dir, $indent) = @_;
+
+  my @entries;
+
+  foreach my $entry (@{$dir->{CHILDREN}}) {
+    $entry = $root_node->{$entry};
+    next if(defined $opt_hidesize && $entry->{SIZE} < $opt_hidesize);
+
+    my $e = {};
+    $e->{NAME} = $entry->{NAME};
+    $e->{SIZE} = $entry->{SIZE};
+    $e->{TYPE} = $entry->{TYPE};
+    $e->{MTIME} = $entry->{MTIME};
+    $e->{CHILDREN} = $entry->{CHILDREN} if $entry->{CHILDREN};
+    push @entries, $e;
+  }
+
+  @entries = reverse sort sortBySize @entries unless $opt_nosort;
+
+  foreach my $entry (@entries) {
+    my $numofchars;
+    my $percent = $dir->{SIZE} == 0 ? 0 : ($entry->{SIZE}/$dir->{SIZE})*100;
+    print "    " x $indent;
+    print prettyFileSize($entry->{SIZE});
+    $numofchars = int ((30 / 100) * $percent);
+    printf(" [%s%s] ", "#" x $numofchars, " " x (30-$numofchars));
+    printf("%6.2f%% ", $percent);
+    printf("%s ", shortDate($entry->{MTIME})) if $opt_showdate;
+    printf("%s%s\n", $entry->{NAME}, $entry->{TYPE} & $TYPE_DIR ? "/" : "");
+    if($entry->{TYPE} & $TYPE_DIR) {
+      printDir($entry, $indent+1) if(!defined $opt_textdepth || ($opt_textdepth > $indent+1));
+    }
+  }
+}
+
+sub processSizeOption {
+  my ($size, $temp);
+
+  if($_[0] =~ m/[bBkKmMgG]$/) {
+    ($size, $temp) = $_[0] =~ m/^(.+)([bBkKmMgG])$/;
+  }
+  else {
+    $size = $_[0];
+  }
+
+  unless (defined $size && ($size =~ m/^\d+$/ || $size =~ m/^\d+\.\d+$/)) {
+    doAbort("Malformed argument: $_[0]");
+  }
+
+  if(defined $temp) {
+    if($temp =~ m/^[kK]/) {
+      return $size * 1024;
+    }
+    elsif ($temp =~ m/^[mM]/) {
+      return $size * 1048576;
+    }
+    elsif ($temp =~ m/^[mM]/) {
+      return $size * 1048576 * 1024;
+    }
+    return $size;
+  }
+}
+
+sub prettyFileSize {
+  my $val = $_[0];
+  my $dtype = "b";
+
+  if($val >= 1024) {
+    $val /= 1024;
+    $dtype = "K";
+  }
+  if($val >= 1024) {
+    $val /= 1024;
+    $dtype = "M";
+  }
+  if($val >= 1024) {
+    $val /= 1024;
+    $dtype = "G";
+  }
+  if($dtype eq "b") {
+    return sprintf("%6d%s", $val, $dtype);
+  }
+  else {
+    return sprintf("%6.1f%s", $val, $dtype);
+  }
+}
+
+sub shortDate {
+  if($_[0] < (time - 31536000)) {
+    return POSIX::strftime("%b %e  %Y", localtime $_[0]);
+  }
+  return POSIX::strftime("%b %e %H:%M", localtime $_[0]);
+}
+
+sub sortBySize {
+  return $a->{SIZE} <=> $b->{SIZE};
+}
+
+### End program with error message
+sub doAbort {
+  warn "Error: $_[0]\n";
+  exit 1;
+}
+
+
+sub catchError {
+  warn "Program interrupted.\n";
+  if($opt_savefile || $opt_loadfile) {
+    untie %{$root_node};
+  }
+  exit 1;
+}
+
+
+sub usage {
+print <<EOF;
+Usage: durep [OPTION(S)] [DIRECTORY]
+   -h, --help                   this help
+   -v, --version                show version number
+
+Text Ouput Options:
+  -td, --text-depth=N           limit text report on directories to depth N
+  -hs, --hide-size=N[bkmg]      do not display entries using N Bytes/Kb/Mb/Gb
+                                or less (default Bytes)
+  -sd, --show-date              show modification date
+  -ns, --nosort                 do not sort results by size
+   -q, --quiet                  do not produce text output
+
+File Options:
+  -sf, --save-file=<file>       save the results of the scan into this file
+  -lf, --load-file=<file>       load the results of a scan from this file
+   -d, --desc=<description>     give description of save file
+   -c, --collate=<dir>          collate save files in dir for web report
+
+Inclusion Options:
+   -f, --files                  do not descend into subdirs, only report files
+   -x, --one-file-system        do not traverse file systems
+  -cp, --collapse-path=<regexp> hide entries below paths that match regexp
+  -ep, --exclude-path=<regexp>  ignore paths that match regexp
+  -cf, --coalesce-files=N[bkmg] coalesce files less than N Bytes/Kb/Mb/Gb
+                                into one entry (default Bytes)
+EOF
+  exit 0;
+}
+

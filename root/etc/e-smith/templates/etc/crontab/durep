@@ -1,0 +1,4 @@
+
+# Generate DUREP reports
+
+01 0 * * * root /usr/sbin/durep.daily
